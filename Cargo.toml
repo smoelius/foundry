@@ -288,3 +288,4 @@ revm = { git = "https://github.com/bluealloy/revm", rev = "caadc71" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "caadc71" }
 
 svm-rs = { path = "svm-rs/crates/svm-rs" }
+foundry-compilers = { git = "https://github.com/smoelius/compilers" }
