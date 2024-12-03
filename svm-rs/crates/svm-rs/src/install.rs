@@ -28,9 +28,7 @@ pub fn blocking_install(version: &Version) -> Result<PathBuf, SvmError> {
     setup_data_dir()?;
 
     let artifacts = crate::blocking_all_releases(platform::platform())?;
-    let artifact = artifacts
-        .get_artifact(version)
-        .ok_or(SvmError::UnknownVersion)?;
+    let artifact = artifacts.get_artifact(version).ok_or(SvmError::UnknownVersion)?;
     let download_url = artifact_url(platform::platform(), version, artifact.to_string().as_str())?;
 
     let expected_checksum = artifacts
@@ -67,10 +65,7 @@ pub async fn install(version: &Version) -> Result<PathBuf, SvmError> {
     setup_data_dir()?;
 
     let artifacts = all_releases(platform::platform()).await?;
-    let artifact = artifacts
-        .releases
-        .get(version)
-        .ok_or(SvmError::UnknownVersion)?;
+    let artifact = artifacts.releases.get(version).ok_or(SvmError::UnknownVersion)?;
     let download_url = artifact_url(platform::platform(), version, artifact.to_string().as_str())?;
 
     let expected_checksum = artifacts
@@ -124,10 +119,7 @@ fn try_lock_file(lock_path: PathBuf) -> Result<LockFile, SvmError> {
         .write(true)
         .open(&lock_path)?;
     _lock_file.lock_exclusive()?;
-    Ok(LockFile {
-        lock_path,
-        _lock_file,
-    })
+    Ok(LockFile { lock_path, _lock_file })
 }
 
 /// Represents a lockfile that's removed once dropped
@@ -160,26 +152,40 @@ struct Installer<'a> {
 impl Installer<'_> {
     /// Installs the solc version at the version specific destination and returns the path to the installed solc file.
     fn install(self) -> Result<PathBuf, SvmError> {
-        let named_temp_file = NamedTempFile::new_in(data_dir())?;
+        let named_temp_file = NamedTempFile::new_in(data_dir()).inspect_err(|error| {
+            eprintln!("{}: {error:?}", line!());
+        })?;
         let (mut f, temp_path) = named_temp_file.into_parts();
 
         #[cfg(target_family = "unix")]
-        f.set_permissions(Permissions::from_mode(0o755))?;
-        f.write_all(self.binbytes)?;
+        f.set_permissions(Permissions::from_mode(0o755)).inspect_err(|error| {
+            eprintln!("{}: {error:?}", line!());
+        })?;
+        f.write_all(self.binbytes).inspect_err(|error| {
+            eprintln!("{}: {error:?}", line!());
+        })?;
 
         if platform::is_nixos() && *self.version >= NIXOS_MIN_PATCH_VERSION {
-            patch_for_nixos(&temp_path)?;
+            patch_for_nixos(&temp_path).inspect_err(|err| {
+                eprintln!("{}: {err:?}", line!());
+            })?;
         }
 
         let solc_path = version_binary(&self.version.to_string());
 
         // Windows requires that the old file be moved out of the way first.
         if cfg!(target_os = "windows") {
-            let temp_path = NamedTempFile::new_in(data_dir()).map(NamedTempFile::into_temp_path)?;
+            let temp_path = NamedTempFile::new_in(data_dir())
+                .map(NamedTempFile::into_temp_path)
+                .inspect_err(|error| {
+                    eprintln!("{}: {error:?}", line!());
+                })?;
             fs::rename(&solc_path, &temp_path).unwrap_or_default();
         }
 
-        temp_path.persist(&solc_path)?;
+        temp_path.persist(&solc_path).inspect_err(|error| {
+            eprintln!("{}: {error:?}", line!());
+        })?;
 
         Ok(solc_path)
     }
@@ -253,12 +259,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_install() {
-        let versions = all_releases(platform())
-            .await
-            .unwrap()
-            .releases
-            .into_keys()
-            .collect::<Vec<Version>>();
+        let versions =
+            all_releases(platform()).await.unwrap().releases.into_keys().collect::<Vec<Version>>();
         let rand_version = versions.choose(&mut rand::thread_rng()).unwrap();
         assert!(install(rand_version).await.is_ok());
     }
@@ -266,11 +268,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn can_install_while_solc_is_running() {
-        const WHICH: &str = if cfg!(target_os = "windows") {
-            "where"
-        } else {
-            "which"
-        };
+        const WHICH: &str = if cfg!(target_os = "windows") { "where" } else { "which" };
 
         let version: Version = "0.8.10".parse().unwrap();
         let solc_path = version_binary(version.to_string().as_str());
@@ -294,9 +292,8 @@ mod tests {
     #[serial_test::serial]
     #[test]
     fn blocking_test_install() {
-        let versions = crate::releases::blocking_all_releases(platform::platform())
-            .unwrap()
-            .into_versions();
+        let versions =
+            crate::releases::blocking_all_releases(platform::platform()).unwrap().into_versions();
         let rand_version = versions.choose(&mut rand::thread_rng()).unwrap();
         assert!(blocking_install(rand_version).is_ok());
     }
@@ -308,9 +305,7 @@ mod tests {
         install(&version).await.unwrap();
         let solc_path = version_binary(version.to_string().as_str());
         let output = Command::new(solc_path).arg("--version").output().unwrap();
-        assert!(String::from_utf8_lossy(&output.stdout)
-            .as_ref()
-            .contains("0.8.10"));
+        assert!(String::from_utf8_lossy(&output.stdout).as_ref().contains("0.8.10"));
     }
 
     #[cfg(feature = "blocking")]
@@ -321,9 +316,7 @@ mod tests {
         let solc_path = version_binary(LATEST.to_string().as_str());
         let output = Command::new(solc_path).arg("--version").output().unwrap();
 
-        assert!(String::from_utf8_lossy(&output.stdout)
-            .as_ref()
-            .contains(&LATEST.to_string()));
+        assert!(String::from_utf8_lossy(&output.stdout).as_ref().contains(&LATEST.to_string()));
     }
 
     #[cfg(feature = "blocking")]
@@ -335,9 +328,7 @@ mod tests {
         let solc_path = version_binary(version.to_string().as_str());
         let output = Command::new(solc_path).arg("--version").output().unwrap();
 
-        assert!(String::from_utf8_lossy(&output.stdout)
-            .as_ref()
-            .contains("0.8.10"));
+        assert!(String::from_utf8_lossy(&output.stdout).as_ref().contains("0.8.10"));
     }
 
     #[cfg(feature = "blocking")]
@@ -376,12 +367,8 @@ mod tests {
         let artifacts = all_releases(Platform::LinuxAarch64).await.unwrap();
 
         let artifact = artifacts.releases.get(&LATEST).unwrap();
-        let download_url = artifact_url(
-            Platform::LinuxAarch64,
-            &LATEST,
-            artifact.to_string().as_str(),
-        )
-        .unwrap();
+        let download_url =
+            artifact_url(Platform::LinuxAarch64, &LATEST, artifact.to_string().as_str()).unwrap();
 
         let checksum = artifacts.get_checksum(&LATEST).unwrap();
 
@@ -399,8 +386,6 @@ mod tests {
         let solc_path = version_binary(version.to_string().as_str());
         let output = Command::new(&solc_path).arg("--version").output().unwrap();
 
-        assert!(String::from_utf8_lossy(&output.stdout)
-            .as_ref()
-            .contains("0.7.1"));
+        assert!(String::from_utf8_lossy(&output.stdout).as_ref().contains("0.7.1"));
     }
 }
